@@ -3,8 +3,8 @@ services:
     name: jcode-platform
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
-    region: oregon
+    plan: free
+    region: singapore
     envVars:
       - key: PORT
         value: 3000
