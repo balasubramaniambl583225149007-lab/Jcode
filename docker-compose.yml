@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # Primary jcode Web Platform Server
+  jcode-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jcode-platform
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - APP_PASSWORD=jcode123
+      - ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      # Managed Sandbox Providers (Optional: E2B or CodeSandbox)
+      # - E2B_API_KEY=e2b_...
+      # - CODESANDBOX_API_KEY=csb_...
+      # GitHub OAuth (Optional: if using OAuth App instead of Personal Access Token)
+      # - GITHUB_CLIENT_ID=...
+      # - GITHUB_CLIENT_SECRET=...
+      # - GITHUB_CALLBACK_URL=http://localhost:3000/api/github/callback
+      # LLM Provider Keys (Optional: if overriding built-in autonomous agent)
+      # - ANTHROPIC_API_KEY=sk-ant-...
+      # - OPENAI_API_KEY=sk-...
+      # - GEMINI_API_KEY=...
+    volumes:
+      - jcode-data:/app/data
+      - jcode-projects:/app/projects
+    # Security Note: If using Docker-in-Docker (DinD) for hardened container sandboxes,
+    # mount the docker socket:
+    # - /var/run/docker.sock:/var/run/docker.sock
+    # Tradeoffs: Mounting /var/run/docker.sock grants root access to host daemon.
+    # In production multi-tenant environments, prefer managed cloud microVMs (E2B / Firecracker).
+
+volumes:
+  jcode-data:
+    name: jcode-data
+  jcode-projects:
+    name: jcode-projects

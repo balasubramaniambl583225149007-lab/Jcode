@@ -1,0 +1,10 @@
+node_modules/
+client/node_modules/
+client/dist/
+data/sessions/
+data/*.enc
+data/*.key
+projects/
+.env
+.DS_Store
+*.log
