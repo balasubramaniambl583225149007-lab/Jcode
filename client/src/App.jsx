@@ -52,19 +52,22 @@ export default function App() {
     try {
       const res = await fetch('/api/auth/me');
       if (res.ok) {
-        setIsAuthenticated(true);
-        loadSessions();
-        loadGitHubStatus();
-      } else {
-        setIsAuthenticated(false);
+        const data = await res.json();
+        if (data && data.authenticated !== false) {
+          setIsAuthenticated(true);
+          loadSessions();
+          loadGitHubStatus();
+          setAuthChecked(true);
+          return;
+        }
       }
     } catch (e) {
       // In offline / standalone mobile mode, automatically unlock workspace
-      setIsAuthenticated(true);
-      loadLocalSessions();
-    } finally {
-      setAuthChecked(true);
     }
+    // Standalone mobile mode fallback
+    setIsAuthenticated(true);
+    loadLocalSessions();
+    setAuthChecked(true);
   };
 
   const loadLocalSessions = () => {

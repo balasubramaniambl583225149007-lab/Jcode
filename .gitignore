@@ -9,3 +9,5 @@ android/build/
 .env
 .DS_Store
 *.log
+*.idsig
+attachments/
