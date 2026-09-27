@@ -4,6 +4,7 @@ import ChatPanel from './components/ChatPanel';
 import WorkspacePanel from './components/WorkspacePanel';
 import SettingsModal from './components/SettingsModal';
 import LoginModal from './components/LoginModal';
+import { runStandaloneAgent } from './standalone-agent';
 import { MessageSquare, Layout } from 'lucide-react';
 
 export default function App() {
@@ -58,10 +59,37 @@ export default function App() {
         setIsAuthenticated(false);
       }
     } catch (e) {
-      setIsAuthenticated(false);
+      // In offline / standalone mobile mode, automatically unlock workspace
+      setIsAuthenticated(true);
+      loadLocalSessions();
     } finally {
       setAuthChecked(true);
     }
+  };
+
+  const loadLocalSessions = () => {
+    try {
+      const saved = localStorage.getItem('jcode_local_sessions');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSessions(parsed);
+          selectSession(parsed[0].id);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    const defaultSession = {
+      id: 'proj_' + Date.now(),
+      name: 'Mobile Studio App',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      projectType: 'react',
+      messages: []
+    };
+    setSessions([defaultSession]);
+    setActiveSessionId(defaultSession.id);
   };
 
   const loadGitHubStatus = async () => {
@@ -71,9 +99,7 @@ export default function App() {
         const data = await res.json();
         setGithubStatus(data);
       }
-    } catch (e) {
-      console.error('Failed to load GitHub status:', e);
-    }
+    } catch (e) {}
   };
 
   const loadSessions = async () => {
@@ -87,9 +113,11 @@ export default function App() {
         } else {
           handleCreateSession();
         }
+      } else {
+        loadLocalSessions();
       }
     } catch (e) {
-      console.error('Failed to load sessions:', e);
+      loadLocalSessions();
     }
   };
 
@@ -100,7 +128,7 @@ export default function App() {
     setSandboxError(null);
     setPreviewUrl(`/preview/${id}/`);
 
-    // Load message history
+    // Load message history from server if available
     try {
       const res = await fetch(`/api/sessions/${id}/messages`);
       if (res.ok) {
@@ -108,13 +136,15 @@ export default function App() {
         setMessages(data);
       }
     } catch (e) {
-      console.error('Failed to fetch messages:', e);
+      // Fallback to local session messages
+      const found = sessions.find(s => s.id === id);
+      if (found && found.messages) {
+        setMessages(found.messages);
+      }
     }
 
-    // Load Git status
     loadGitStatus(id);
 
-    // Join session on WebSocket
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'join_session', sessionId: id }));
     }
@@ -128,9 +158,7 @@ export default function App() {
         const data = await res.json();
         setGitStatus(data);
       }
-    } catch (e) {
-      console.error('Failed to fetch git status:', e);
-    }
+    } catch (e) {}
   };
 
   const handleCreateSession = async () => {
@@ -144,80 +172,170 @@ export default function App() {
         const newSession = await res.json();
         setSessions(prev => [newSession, ...prev]);
         selectSession(newSession.id);
+        return;
       }
-    } catch (e) {
-      console.error('Failed to create session:', e);
-    }
+    } catch (e) {}
+
+    // Local session creation
+    const localSession = {
+      id: 'proj_' + Date.now(),
+      name: 'Untitled Project',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      projectType: 'react',
+      messages: []
+    };
+    setSessions(prev => [localSession, ...prev]);
+    setActiveSessionId(localSession.id);
   };
 
   const handleDeleteSession = async (id) => {
     try {
-      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        const updated = sessions.filter(s => s.id !== id);
-        setSessions(updated);
-        if (updated.length > 0) {
-          selectSession(updated[0].id);
-        } else {
-          handleCreateSession();
-        }
-      }
-    } catch (e) {
-      console.error('Failed to delete session:', e);
+      await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+    } catch (e) {}
+
+    const updated = sessions.filter(s => s.id !== id);
+    setSessions(updated);
+    if (updated.length > 0) {
+      selectSession(updated[0].id);
+    } else {
+      handleCreateSession();
     }
   };
 
-  // Setup WebSocket connection
+  // Setup WebSocket connection when server is present
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      if (!host) return;
 
-    ws.onopen = () => {
-      if (activeSessionId) {
-        ws.send(JSON.stringify({ type: 'join_session', sessionId: activeSessionId }));
-      }
+      const wsUrl = `${protocol}//${host}/ws`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (activeSessionId) {
+          ws.send(JSON.stringify({ type: 'join_session', sessionId: activeSessionId }));
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'preview_ready') {
+            setPreviewUrl(data.previewUrl);
+            setPreviewPort(data.port);
+            setPreviewReady(true);
+            setSandboxError(null);
+          }
+
+          if (data.type === 'sandbox_error') {
+            setSandboxError(data.error);
+          }
+
+          if (data.type === 'new_message') {
+            setMessages(prev => [...prev, data.message]);
+          }
+
+          if (data.type === 'assistant_start') {
+            setIsGenerating(true);
+            setStreamingMessage({
+              id: data.id,
+              role: 'assistant',
+              content: '',
+              events: [],
+              timestamp: new Date().toISOString()
+            });
+          }
+
+          if (data.type === 'agent_event') {
+            const ev = data.event;
+            setStreamingMessage(prev => {
+              if (!prev) return prev;
+              const updated = { ...prev };
+              
+              if (ev.type === 'text_chunk') {
+                updated.content += ev.text;
+              } else if (ev.type === 'thinking_delta') {
+                let existingThink = updated.events.find(e => e.type === 'thinking');
+                if (!existingThink) {
+                  existingThink = { type: 'thinking', thoughts: [] };
+                  updated.events = [...updated.events, existingThink];
+                }
+                existingThink.thoughts.push(ev.thought);
+              } else if (['tool_call', 'file_edit', 'shell_command'].includes(ev.type)) {
+                updated.events = [...updated.events, ev];
+              }
+              return updated;
+            });
+          }
+
+          if (data.type === 'assistant_done') {
+            setIsGenerating(false);
+            setStreamingMessage(null);
+            setMessages(prev => [...prev, data.message]);
+            fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {});
+            loadGitStatus();
+          }
+
+          if (data.type === 'files_updated') {
+            loadGitStatus();
+          }
+        } catch (err) {}
+      };
+
+      return () => {
+        ws.close();
+      };
+    } catch (e) {}
+  }, [isAuthenticated, activeSessionId]);
+
+  const handleSendPrompt = async (prompt) => {
+    if (!activeSessionId) return;
+
+    // If WebSocket connected to live backend server, use it
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      setSandboxError(null);
+      wsRef.current.send(JSON.stringify({
+        type: 'send_prompt',
+        sessionId: activeSessionId,
+        prompt
+      }));
+      return;
+    }
+
+    // Standalone Autonomous Engine (Works 100% on mobile without server)
+    setSandboxError(null);
+    setIsGenerating(true);
+
+    const userMsg = {
+      id: 'msg_' + Date.now(),
+      role: 'user',
+      content: prompt,
+      timestamp: new Date().toISOString()
     };
+    setMessages(prev => [...prev, userMsg]);
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+    const assistantMsgId = 'msg_' + (Date.now() + 1);
+    setStreamingMessage({
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      events: [],
+      timestamp: new Date().toISOString()
+    });
 
-        if (data.type === 'preview_ready') {
-          setPreviewUrl(data.previewUrl);
-          setPreviewPort(data.port);
-          setPreviewReady(true);
-          setSandboxError(null);
-        }
-
-        if (data.type === 'sandbox_error') {
-          setSandboxError(data.error);
-        }
-
-        if (data.type === 'new_message') {
-          setMessages(prev => [...prev, data.message]);
-        }
-
-        if (data.type === 'assistant_start') {
-          setIsGenerating(true);
-          setStreamingMessage({
-            id: data.id,
-            role: 'assistant',
-            content: '',
-            events: [],
-            timestamp: new Date().toISOString()
-          });
-        }
-
+    try {
+      const result = await runStandaloneAgent(prompt, (data) => {
         if (data.type === 'agent_event') {
           const ev = data.event;
           setStreamingMessage(prev => {
             if (!prev) return prev;
             const updated = { ...prev };
-            
             if (ev.type === 'text_chunk') {
               updated.content += ev.text;
             } else if (ev.type === 'thinking_delta') {
@@ -233,58 +351,45 @@ export default function App() {
             return updated;
           });
         }
+      });
 
-        if (data.type === 'assistant_done') {
-          setIsGenerating(false);
-          setStreamingMessage(null);
-          setMessages(prev => [...prev, data.message]);
-          // Refresh sessions list to update project name and timestamp
-          fetch('/api/sessions').then(r => r.json()).then(setSessions);
-          loadGitStatus();
+      // Inject generated HTML directly into iframe preview
+      const blob = new Blob([result.html], { type: 'text/html' });
+      const blobUrl = URL.createObjectURL(blob);
+      setPreviewUrl(blobUrl);
+      setPreviewReady(true);
+
+      // Finalize assistant message
+      setStreamingMessage(curr => {
+        if (curr) {
+          setMessages(prev => [...prev, curr]);
         }
+        return null;
+      });
 
-        if (data.type === 'files_updated') {
-          loadGitStatus();
+      // Update session title
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId && (s.name === 'Untitled Project' || !s.name || s.name === 'Mobile Studio App')) {
+          return { ...s, name: result.appTitle };
         }
-      } catch (err) {
-        console.error('WS parse error:', err);
-      }
-    };
+        return s;
+      }));
 
-    ws.onclose = () => {
-      console.log('WS disconnected, reconnecting in 2s...');
-      setTimeout(() => {
-        if (isAuthenticated) checkAuth();
-      }, 2000);
-    };
-
-    return () => {
-      ws.close();
-    };
-  }, [isAuthenticated, activeSessionId]);
-
-  const handleSendPrompt = (prompt) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !activeSessionId) return;
-    setSandboxError(null);
-    wsRef.current.send(JSON.stringify({
-      type: 'send_prompt',
-      sessionId: activeSessionId,
-      prompt
-    }));
+    } catch (e) {
+      console.error('Standalone agent error:', e);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleAutoFix = (error) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !activeSessionId) return;
-    wsRef.current.send(JSON.stringify({
-      type: 'auto_fix_error',
-      sessionId: activeSessionId,
-      prompt: `Please diagnose and fix this dev server / build error:\n\n${error}`
-    }));
-    setSandboxError(null);
+    handleSendPrompt(`Fix the following build error:\n${error}`);
   };
 
   const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {}
     setIsAuthenticated(false);
   };
 
@@ -414,7 +519,9 @@ export default function App() {
         githubStatus={githubStatus}
         onSaveGitHubToken={() => loadGitHubStatus()}
         onDisconnectGitHub={async () => {
-          await fetch('/api/github/disconnect', { method: 'POST' });
+          try {
+            await fetch('/api/github/disconnect', { method: 'POST' });
+          } catch (e) {}
           loadGitHubStatus();
         }}
       />
