@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: jcode-platform
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: APP_PASSWORD
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+    disk:
+      name: jcode-data
+      mountPath: /app/data
+      sizeGB: 10
