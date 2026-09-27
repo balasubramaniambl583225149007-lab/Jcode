@@ -15,6 +15,8 @@ mkdir -p build/classes
 
 echo "==> Step 1: Compiling Android resources with aapt..."
 "$BUILD_TOOLS/aapt" package -f -m \
+    --min-sdk-version 24 \
+    --target-sdk-version 34 \
     -J src \
     -M AndroidManifest.xml \
     -S res \
@@ -33,6 +35,8 @@ echo "==> Step 3: Compiling DEX bytecode with d8..."
 
 echo "==> Step 4: Packaging resources & web assets into APK with aapt..."
 "$BUILD_TOOLS/aapt" package -f \
+    --min-sdk-version 24 \
+    --target-sdk-version 34 \
     -M AndroidManifest.xml \
     -S res \
     -A assets \
@@ -60,12 +64,15 @@ if [ ! -f build/release.keystore ]; then
         -dname "CN=jcode Studio, OU=Mobile, O=jcode, L=San Francisco, ST=CA, C=US"
 fi
 
-echo "==> Step 8: Signing APK with apksigner (v1, v2, v3, v4)..."
+echo "==> Step 8: Signing APK with apksigner (v1, v2, v3)..."
 "$BUILD_TOOLS/apksigner" sign \
     --ks build/release.keystore \
     --ks-key-alias jcode \
     --ks-pass pass:jcode123 \
     --key-pass pass:jcode123 \
+    --v1-signing-enabled true \
+    --v2-signing-enabled true \
+    --v3-signing-enabled true \
     --out "$OUTPUT_APK" \
     build/aligned.apk
 
