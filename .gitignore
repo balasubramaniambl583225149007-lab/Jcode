@@ -5,6 +5,7 @@ data/sessions/
 data/*.enc
 data/*.key
 projects/
+android/build/
 .env
 .DS_Store
 *.log

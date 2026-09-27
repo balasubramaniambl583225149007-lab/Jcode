@@ -40,6 +40,16 @@ app.use('/preview/:sessionId', (req, res) => {
   sandboxManager.handleProxy(req, res, sessionId);
 });
 
+// Direct APK download route
+app.get('/download/jcode.apk', (req, res) => {
+  const apkPath = path.resolve(__dirname, '../jcode.apk');
+  if (fs.existsSync(apkPath)) {
+    res.download(apkPath, 'jcode.apk');
+  } else {
+    res.status(404).send('APK not found');
+  }
+});
+
 // Auth Routes
 app.post('/api/auth/login', (req, res) => {
   const { password } = req.body;
